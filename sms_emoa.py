@@ -12,7 +12,7 @@ from pymoo.core.duplicate import NoDuplicateElimination
 
 # --- Custom Imports ---
 from sms_logic import run_parallel_ils, optimize_tour_orientation
-from problem import TTPProblem, TunableSpectrumSampling, SmartMutation, CustomCrossover
+from problem_logic import TTPProblem, TunableSpectrumSampling, SmartMutation, CustomCrossover
 
 warnings.filterwarnings("ignore")
 

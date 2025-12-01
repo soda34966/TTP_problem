@@ -188,7 +188,7 @@ class TTPProblem(Problem):
             pack_genes = X[i, self.n_cities:]
             picked_mask = pack_genes > 0.5
             
-            # Greedy Repair
+            # Greedy Repair()
             current_w = np.sum(item_w[picked_mask])
             if current_w > cap:
                 idxs = np.where(picked_mask)[0]
