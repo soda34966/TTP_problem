@@ -172,7 +172,7 @@ def optimize_tour_orientation(nodes, tour, items):
         item_locs = items[:, 2].astype(int)
         item_ws = items[:, 1]
         
-        # We want heavy items to have HIGH cumulative distance (picked up last)
+        # heavy items with HIGH cumulative distance (picked up last)
         score = np.sum(item_ws * dist_map[item_locs])
         return score
 

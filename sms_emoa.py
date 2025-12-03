@@ -5,14 +5,10 @@ import glob
 import multiprocessing
 import matplotlib.pyplot as plt
 
-# --- Library Imports ---
-from pymoo.algorithms.moo.sms import SMSEMOA
-from pymoo.optimize import minimize
-from pymoo.core.duplicate import NoDuplicateElimination
-
-# --- Custom Imports ---
+# --- Custom Framework Imports ---
+from emoa_framework import CustomSMSEMOA
 from sms_logic import run_parallel_ils, optimize_tour_orientation
-from problem_logic import TTPProblem, TunableSpectrumSampling, SmartMutation, CustomCrossover
+from problem_logic import TTPProblem, TunableSpectrumSampling, Mutation, Crossover
 
 warnings.filterwarnings("ignore")
 
@@ -45,7 +41,6 @@ def main():
         return
 
     # 2. Temp Load Data for ILS (Core Optimization)
-    # We need a quick load just for coords and items to run the pre-optimization
     temp_problem_nodes = []
     temp_items = []
     
@@ -66,41 +61,37 @@ def main():
     items_arr = np.array(temp_items)
     
     # 3. Run Pre-Optimizers (ILS + Orientation)
-    ils_time = 180 # Seconds allowed for ILS
+    ils_time = 180
     best_tour = run_parallel_ils(nodes_arr, time_limit=ils_time)
-    
-    # Critical Step: Orientation Check
     best_tour = optimize_tour_orientation(nodes_arr, best_tour, items_arr)
 
     # 4. Initialize Main Evolutionary Process
     problem = TTPProblem(selected_path, best_tour)
     
-    print(">>> Sampling Initial Population (Locked Tour + Cloud)...")
-    sampler = TunableSpectrumSampling()
-    X_init = sampler._do(problem, 150)
+    print(">>> Initializing Custom SMS-EMOA...")
     
-    # Initial Eval for plotting
-    out_init = {}
-    problem._evaluate(X_init, out_init)
-    F_init = out_init["F"]
-
-    print(f">>> Initializing SMS-EMOA...")
-    algorithm = SMSEMOA(
-        pop_size=100,
-        sampling=X_init,
-        crossover=CustomCrossover(problem),
-        mutation=SmartMutation(problem),
-        eliminate_duplicates=NoDuplicateElimination()
+    # Instantiate Custom Algorithm
+    algorithm = CustomSMSEMOA(
+        problem=problem,
+        pop_size=20,
+        sampling=TunableSpectrumSampling(),
+        crossover=Crossover(problem),
+        mutation=Mutation(problem)
     )
 
     print(f">>> Starting Optimization...")
-    res = minimize(problem, algorithm, ('n_gen', 500), seed=42, verbose=True)
+    
+    # Run Algorithm
+    final_pop = algorithm.run(n_gen=200, verbose=True)
 
     # 5. Save and Plot Results
-    f_path = os.path.join(res_f_dir, f"RES_{base_name}.f")
-    sorted_indices = np.argsort(res.F[:, 0])
-    F_sorted = res.F[sorted_indices]
+    res_F = final_pop.get_F()
     
+    # Sort for plotting
+    sorted_indices = np.argsort(res_F[:, 0])
+    F_sorted = res_F[sorted_indices]
+    
+    f_path = os.path.join(res_f_dir, f"RES_{base_name}.f")
     print(f"\n>>> Saving Results to {f_path}...")
     with open(f_path, 'w') as f_out:
         for row in F_sorted: 
@@ -115,13 +106,17 @@ def main():
         try:
             hpi = np.loadtxt(hpi_file)
             if hpi.ndim > 1:
-                # Ensure HPI is positive profit if formatted that way
                 if hpi[0, 1] > 0: hpi[:, 1] = -hpi[:, 1]
                 hpi = hpi[np.argsort(hpi[:, 0])]
                 plt.plot(hpi[:, 0], hpi[:, 1], 'g--', linewidth=2.5, alpha=0.9, label='HPI Reference')
         except: pass
 
-    plt.scatter(F_init[:, 0], F_init[:, 1], c='gray', marker='x', s=40, alpha=0.4, label='Initial')
+    # --- FIX: Retrieve and Plot Initial Population ---
+    F_init = algorithm.initial_F
+    if F_init is not None:
+        plt.scatter(F_init[:, 0], F_init[:, 1], c='gray', marker='x', s=40, alpha=0.4, label='Initial')
+
+    # Plot final front
     plt.plot(F_sorted[:, 0], F_sorted[:, 1], 'r-o', linewidth=1.5, markersize=5, label='Optimized')
     plt.xlabel("Travel Time"); plt.ylabel("Negative Profit")
     plt.title(f"TTP Evolution: {base_name}")
