@@ -63,62 +63,136 @@ class TunableSpectrumSampling(Sampling):
 # ==========================================
 # 2. CUSTOM OPERATORS
 # ==========================================
+# class SmartMutation(Mutation):
+#     def __init__(self, problem):
+#         super().__init__()
+#         self.n_cities = problem.n_cities
+#         self.nodes = problem.nodes
+#         self.pack_prob = 0.2
+#         self.tour_prob = 0.15       
+#         self.scores = problem.physics_scores
+#         self.tolerance = 50.0 
+
+#     def _do(self, problem, X, **kwargs):
+#         n_pop, _ = X.shape
+#         for i in range(n_pop):
+#             # 1. KNAPSACK MUTATION
+#             if np.random.random() < self.pack_prob:
+#                 pack_genes = X[i, self.n_cities:]
+#                 picked = pack_genes > 0.5
+#                 if np.any(picked):
+#                     indices = np.where(picked)[0]
+#                     noisy_scores = self.scores[indices] * np.random.uniform(0.9, 1.1, len(indices))
+#                     worst = indices[np.argmin(noisy_scores)]
+#                     X[i, self.n_cities + worst] = 0.0
+#                 not_picked = ~picked
+#                 if np.any(not_picked):
+#                     indices = np.where(not_picked)[0]
+#                     candidates = indices[np.argsort(self.scores[indices])[-20:]]
+#                     if len(candidates) > 0:
+#                         best = np.random.choice(candidates)
+#                         X[i, self.n_cities + best] = 1.0
+
+#             # 2. GUARDED TOUR MUTATION
+#             if np.random.random() < self.tour_prob:
+#                 tour_keys = X[i, :self.n_cities]
+#                 current_order = np.argsort(tour_keys)
+                
+#                 a = np.random.randint(1, self.n_cities - 2)
+#                 window = np.random.randint(2, 100)
+#                 b = min(a + window, self.n_cities - 1)
+                
+#                 # Modulo Fix for wrapping
+#                 idx_prev = current_order[a-1]
+#                 idx_a    = current_order[a]
+#                 idx_b    = current_order[b]
+#                 idx_next = current_order[(b+1) % self.n_cities] 
+                
+#                 p_prev = self.nodes[idx_prev]
+#                 p_a    = self.nodes[idx_a]
+#                 p_b    = self.nodes[idx_b]
+#                 p_next = self.nodes[idx_next]
+                
+#                 d_current = np.linalg.norm(p_prev - p_a) + np.linalg.norm(p_b - p_next)
+#                 d_new     = np.linalg.norm(p_prev - p_b) + np.linalg.norm(p_a - p_next)
+                
+#                 delta = d_new - d_current
+#                 if delta < self.tolerance:
+#                     X[i, a:b+1] = X[i, a:b+1][::-1]
+#         return X
+
+# class CustomCrossover(Crossover):
+#     def __init__(self, problem):
+#         super().__init__(2, 2)
+#         self.n_cities = problem.n_cities
+
+#     def _do(self, problem, X, **kwargs):
+#         _, n_var = X.shape
+#         Y = X.copy()
+#         X_pack = X[:, self.n_cities:]
+#         mask = np.random.random(X_pack[0].shape) < 0.5
+#         Y[0, self.n_cities:] = np.where(mask, X_pack[0], X_pack[1])
+#         Y[1, self.n_cities:] = np.where(mask, X_pack[1], X_pack[0])
+#         return Y
+
 class SmartMutation(Mutation):
     def __init__(self, problem):
         super().__init__()
         self.n_cities = problem.n_cities
         self.nodes = problem.nodes
         self.pack_prob = 0.2
-        self.tour_prob = 0.15       
+        self.tour_prob = 0.2
+
         self.scores = problem.physics_scores
-        self.tolerance = 50.0 
+        self.tolerance = 20.0
+
+    def random_key_encode(self, perm):
+        # Convert a permutation into random keys
+        rk = np.zeros(len(perm))
+        rk[perm] = np.random.rand(len(perm))
+        return rk
+
+    def two_opt(self, perm):
+        n = len(perm)
+        a, b = sorted(np.random.choice(n, 2, replace=False))
+        perm[a:b] = perm[a:b][::-1]
+        return perm
 
     def _do(self, problem, X, **kwargs):
         n_pop, _ = X.shape
-        for i in range(n_pop):
-            # 1. KNAPSACK MUTATION
-            if np.random.random() < self.pack_prob:
-                pack_genes = X[i, self.n_cities:]
-                picked = pack_genes > 0.5
-                if np.any(picked):
-                    indices = np.where(picked)[0]
-                    noisy_scores = self.scores[indices] * np.random.uniform(0.9, 1.1, len(indices))
-                    worst = indices[np.argmin(noisy_scores)]
-                    X[i, self.n_cities + worst] = 0.0
-                not_picked = ~picked
-                if np.any(not_picked):
-                    indices = np.where(not_picked)[0]
-                    candidates = indices[np.argsort(self.scores[indices])[-20:]]
-                    if len(candidates) > 0:
-                        best = np.random.choice(candidates)
-                        X[i, self.n_cities + best] = 1.0
 
-            # 2. GUARDED TOUR MUTATION
-            if np.random.random() < self.tour_prob:
-                tour_keys = X[i, :self.n_cities]
-                current_order = np.argsort(tour_keys)
-                
-                a = np.random.randint(1, self.n_cities - 2)
-                window = np.random.randint(2, 100)
-                b = min(a + window, self.n_cities - 1)
-                
-                # Modulo Fix for wrapping
-                idx_prev = current_order[a-1]
-                idx_a    = current_order[a]
-                idx_b    = current_order[b]
-                idx_next = current_order[(b+1) % self.n_cities] 
-                
-                p_prev = self.nodes[idx_prev]
-                p_a    = self.nodes[idx_a]
-                p_b    = self.nodes[idx_b]
-                p_next = self.nodes[idx_next]
-                
-                d_current = np.linalg.norm(p_prev - p_a) + np.linalg.norm(p_b - p_next)
-                d_new     = np.linalg.norm(p_prev - p_b) + np.linalg.norm(p_a - p_next)
-                
-                delta = d_new - d_current
-                if delta < self.tolerance:
-                    X[i, a:b+1] = X[i, a:b+1][::-1]
+        for i in range(n_pop):
+
+            # -----------------------
+            # 1. KNAPSACK MUTATION
+            # -----------------------
+            if np.random.rand() < self.pack_prob:
+                packs = X[i, self.n_cities:]
+                picked = packs > 0.5
+                not_picked = ~picked
+
+                if np.any(picked):
+                    worst = np.random.choice(np.where(picked)[0])
+                    packs[worst] = 0
+
+                if np.any(not_picked):
+                    best = np.random.choice(np.where(not_picked)[0])
+                    packs[best] = 1
+
+                X[i, self.n_cities:] = packs
+
+            # -----------------------
+            # 2. TOUR MUTATION (2-opt)
+            # -----------------------
+            if np.random.rand() < self.tour_prob:
+                keys = X[i, :self.n_cities]
+                perm = np.argsort(keys)
+
+                new_perm = self.two_opt(perm.copy())
+
+                # Encode back to random keys
+                X[i, :self.n_cities] = self.random_key_encode(new_perm)
+
         return X
 
 class CustomCrossover(Crossover):
@@ -126,14 +200,47 @@ class CustomCrossover(Crossover):
         super().__init__(2, 2)
         self.n_cities = problem.n_cities
 
+    def pmx(self, p1, p2):
+        n = len(p1)
+        a, b = sorted(np.random.choice(n, 2, replace=False))
+        c = -np.ones(n, dtype=int)
+        c[a:b] = p1[a:b]
+
+        for i in range(a, b):
+            if p2[i] not in c:
+                pos = i
+                val = p2[i]
+                while True:
+                    pos = np.where(p2 == p1[pos])[0][0]
+                    if c[pos] == -1:
+                        c[pos] = val
+                        break
+        mask = (c == -1)
+        c[mask] = p2[mask]
+        return c
+
     def _do(self, problem, X, **kwargs):
-        _, _, n_var = X.shape
-        Y = X.copy()
-        X_pack = X[:, :, self.n_cities:]
-        mask = np.random.random(X_pack[0].shape) < 0.5
-        Y[0, :, self.n_cities:] = np.where(mask, X_pack[0], X_pack[1])
-        Y[1, :, self.n_cities:] = np.where(mask, X_pack[1], X_pack[0])
+        _, n_var = X.shape
+        Y = np.empty_like(X)
+
+        p1 = X[0, :self.n_cities].astype(int)
+        p2 = X[1, :self.n_cities].astype(int)
+
+        # --- TOUR CROSSOVER ---
+        child1_tour = self.pmx(p1, p2)
+        child2_tour = self.pmx(p2, p1)
+
+        # --- PACK CROSSOVER ---
+        X_pack = X[:, self.n_cities:]
+        mask = np.random.rand(X_pack.shape[1]) < 0.5
+
+        child1_pack = np.where(mask, X_pack[0], X_pack[1])
+        child2_pack = np.where(mask, X_pack[1], X_pack[0])
+
+        Y[0] = np.concatenate([child1_tour, child1_pack])
+        Y[1] = np.concatenate([child2_tour, child2_pack])
         return Y
+
 
 # ==========================================
 # 3. PROBLEM CLASS
