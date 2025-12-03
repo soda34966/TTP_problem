@@ -1,3 +1,4 @@
+from TTPProblem import TTPProblemAdapter
 import numpy as np
 import warnings
 import os
@@ -7,10 +8,12 @@ import matplotlib.pyplot as plt
 
 # --- Library Imports ---
 from pymoo.algorithms.moo.sms import SMSEMOA
+from purealgorithm import smsemoa
 from pymoo.optimize import minimize
 from pymoo.core.duplicate import NoDuplicateElimination
 
 # --- Custom Imports ---
+# from smsemoa import SMSEMOA
 from sms_logic import run_parallel_ils, optimize_tour_orientation
 from problem_logic import TTPProblem, TunableSpectrumSampling, SmartMutation, CustomCrossover
 
@@ -85,21 +88,37 @@ def main():
     F_init = out_init["F"]
 
     print(f">>> Initializing SMS-EMOA...")
-    algorithm = SMSEMOA(
-        pop_size=100,
-        sampling=X_init,
-        crossover=CustomCrossover(problem),
-        mutation=SmartMutation(problem),
-        eliminate_duplicates=NoDuplicateElimination()
-    )
+    # algorithm = SMSEMOA(
+    #     pop_size=100,
+    #     sampling=X_init,
+    #     crossover=CustomCrossover(problem),
+    #     mutation=SmartMutation(problem),
+    #     eliminate_duplicates=NoDuplicateElimination()
+    # )
 
-    print(f">>> Starting Optimization...")
-    res = minimize(problem, algorithm, ('n_gen', 500), seed=42, verbose=True)
+    # res = minimize(problem, algorithm, ('n_gen', 500), seed=42, verbose=True)
+    adapter = TTPProblemAdapter(problem)
+
+    final_pop, final_F = smsemoa(
+        adapter, 
+        n_var=problem.n_cities + problem.n_items, 
+        n_obj=2, 
+        pop_size=100, 
+        n_gen=500,
+        sampler=sampler,
+        crossover=CustomCrossover(problem),
+        mutation=SmartMutation(problem)
+    )
+    print("================================")
+    print("Final objective values:")
+    print(np.array(final_F))
+    print("================================")
 
     # 5. Save and Plot Results
     f_path = os.path.join(res_f_dir, f"RES_{base_name}.f")
-    sorted_indices = np.argsort(res.F[:, 0])
-    F_sorted = res.F[sorted_indices]
+    final_F = np.array(final_F)
+    sorted_indices = np.argsort(final_F[:, 0])
+    F_sorted = final_F[sorted_indices]
     
     print(f"\n>>> Saving Results to {f_path}...")
     with open(f_path, 'w') as f_out:
