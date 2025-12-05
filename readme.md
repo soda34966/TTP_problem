@@ -30,4 +30,4 @@ All parameter can be adjusted in sms_emoa.py in CONFIG section
 * SciPy (for cKDTree in Iterated Local Search )
 
 ```bash
-pip install numpy matplotlib
+pip install numpy matplotlib SciPy
