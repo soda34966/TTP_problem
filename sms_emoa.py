@@ -40,7 +40,7 @@ CONFIG = {
 }
 
 # ==========================================
-# GECCO 2019 EVALUATION LOGIC
+# EVALUATION LOGIC
 # ==========================================
 def get_non_dominated(F):
     n = F.shape[0]
