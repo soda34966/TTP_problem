@@ -9,7 +9,7 @@ import re
 
 # --- Custom Framework Imports ---
 from emoa_framework import CustomSMSEMOA
-from sms_logic import run_parallel_ils, optimize_tour_orientation
+from lts_logic import run_parallel_ils, optimize_tour_orientation
 from problem_logic import TTPProblem, TunableSpectrumSampling, Mutation, Crossover
 
 warnings.filterwarnings("ignore")
@@ -19,11 +19,11 @@ warnings.filterwarnings("ignore")
 # ==========================================
 CONFIG = {
     # --- Pre-Processing ---
-    'ils_time_limit': 300,       # Seconds for initial tour optimization
+    'ils_time_limit': 240,       # Seconds for initial tour optimization
     
     # --- General GA Settings ---
-    'pop_size': 20,            # Population Size
-    'n_gen': 200,               # Number of Generations
+    'pop_size': 100,            # Population Size
+    'n_gen': 500,               # Number of Generations
     
     # --- Sampling (Initialization) ---
     'sample_sigma_min': 1.0,    # Min spread for Gaussian cloud

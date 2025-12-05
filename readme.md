@@ -3,8 +3,8 @@
 ## Project Structure
 
 * **`sms_emoa.py`**: The main entry point script that runs the optimization algorithm.
-* **`problem_logic.py`**: Defines the TTP problem, including the objective functions (Travel Time vs. Total Profit) and evaluation logic.
-* **`sms_logic.py`**: Contains the core logic for the SMS-EMOA, including hypervolume contribution calculations and selection mechanisms.
+* **`problem_logic.py`**: Defines the TTP problem, including the objective functions (Travel Time vs. Total Profit) and evaluation logic. Also crossover and mutation logic.
+* **`lts_logic.py`**: Contains the core logic for the Iterated Local Search, including calculations and multiprocessing mechanisms.
 * **`emoa_framework.py`**: General framework utilities for the evolutionary algorithm.
 * **`TTP_resource/`**: Contains the benchmark problem instances.
 * **`result_compitition/`**: Stores reference results (Pareto fronts) from other algorithms for comparison.

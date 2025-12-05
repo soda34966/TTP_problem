@@ -1,8 +1,8 @@
 Rank  Team                 Hypervolume
 ----------------------------------------
-1     HPI                  0.915986
-2     NTGA                 0.904018
-3     My_Algorithm         0.903993
-4     ALLAOUI              0.895619
-5     FRA                  0.334599
-6     JG                   0.284734
+1     HPI                  0.916938
+2     NTGA                 0.904958
+3     My_Algorithm         0.898928
+4     ALLAOUI              0.896550
+5     FRA                  0.334947
+6     JG                   0.285030
