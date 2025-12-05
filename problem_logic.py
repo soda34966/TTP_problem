@@ -1,27 +1,25 @@
 import numpy as np
 
 # ==========================================
-# 1. TUNABLE SPECTRUM SAMPLING
+# 1. SAMPLING
 # ==========================================
 class TunableSpectrumSampling:
+    def __init__(self, sigma_min=1.0, sigma_max=10.0):
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+
     def do(self, problem, n_samples):
-        # Access problem attributes directly
         n_var = problem.n_var
         n_c = problem.n_cities
         
         X = np.zeros((n_samples, n_var))
         
-        # 1. Setup Base Keys based on ILS Tour
         base_tour = problem.base_tour
-        # Create keys such that argsort(keys) == base_tour
         perfect_keys = np.linspace(0.00001, 0.99999, n_c)
-        
-        # keys[base_tour[i]] < keys[base_tour[i+1]]
         base_k = np.zeros(n_c)
         for rank, city_idx in enumerate(base_tour):
             base_k[city_idx] = perfect_keys[rank]
 
-        # 2. Pre-calc distances
         coords = problem.nodes[base_tour]
         edges = np.sqrt(np.sum((coords - np.roll(coords, -1, axis=0))**2, axis=1))
         dist_map = np.zeros(n_c); cum_dist = 0
@@ -29,101 +27,128 @@ class TunableSpectrumSampling:
             dist_map[base_tour[i]] = cum_dist; cum_dist += edges[i]
         item_dists = dist_map[problem.item_locs]
 
-        # 3. Generate Population
         for i in range(n_samples):
-            # --- A. The Gaussian Cloud ---
-            if i == 0:
+            # --- A. Tour Component ---
+            if i < 2: 
                 X[i, :n_c] = base_k
             else:
                 step_size = 1.0 / n_c
-                # Wider sigma for exploration
-                sigma = step_size * np.random.uniform(1.0, 5.0) 
+                # Use Configured Sigma
+                sigma = step_size * np.random.uniform(self.sigma_min, self.sigma_max) 
                 noise = np.random.normal(0, sigma, n_c)
                 X[i, :n_c] = np.clip(base_k + noise, 0, 1)
 
             # --- B. PACKING COMPONENT ---
-            target_pct = i / (n_samples - 1)
-            target_weight = problem.capacity * target_pct
-            alpha = 1.0 - (target_pct * 0.8)
-            
-            tuned_cost = problem.item_weights * (item_dists ** alpha + 1e-9)
-            tuned_scores = problem.item_profits / (tuned_cost + 1e-9)
-            
-            ranked_items = np.argsort(-tuned_scores)
-            current_w = 0
-            
-            for idx in ranked_items:
-                w = problem.item_weights[idx]
-                if current_w + w <= target_weight:
-                    X[i, n_c + idx] = 1.0
-                    current_w += w
+            if i == 0:
+                X[i, n_c:] = 0.0
+            elif i == 1:
+                ratios = problem.item_profits / (problem.item_weights + 1e-9)
+                sorted_items = np.argsort(-ratios)
+                curr_w = 0
+                for idx in sorted_items:
+                    if curr_w + problem.item_weights[idx] <= problem.capacity:
+                        X[i, n_c + idx] = 1.0
+                        curr_w += problem.item_weights[idx]
+            else:
+                if np.random.random() < 0.3:
+                    X[i, n_c:] = (np.random.random(problem.n_items) < 0.1).astype(float)
+                else:
+                    target_pct = (i - 1) / (n_samples - 2) 
+                    target_weight = problem.capacity * target_pct
+                    alpha = np.random.uniform(0.5, 1.5)
+                    tuned_cost = problem.item_weights * (item_dists ** alpha + 1e-9)
+                    tuned_scores = problem.item_profits / (tuned_cost + 1e-9)
+                    
+                    ranked_items = np.argsort(-tuned_scores)
+                    current_w = 0
+                    for idx in ranked_items:
+                        w = problem.item_weights[idx]
+                        if current_w + w <= target_weight:
+                            X[i, n_c + idx] = 1.0
+                            current_w += w
         return X
 
 # ==========================================
-# 2. CUSTOM OPERATORS
+# 2.MUTATION And CROSSOVER
 # ==========================================
 class Mutation:
-    def __init__(self, problem):
+    def __init__(self, problem, config=None):
         self.n_cities = problem.n_cities
+        self.n_items = problem.n_items
         self.nodes = problem.nodes
-        self.pack_prob = 0.3
-        self.tour_prob = 0.2
         self.scores = problem.physics_scores
-        self.tolerance = 50.0 
+        self.tolerance = 500.0 
+        
+        # Load Defaults or Config
+        if config is None:
+            config = {}
+        
+        self.pack_prob = config.get('mut_pack_prob', 0.5)
+        self.tour_prob = config.get('mut_tour_prob', 0.3)
+        self.flip_prob = config.get('mut_pack_flip_prob', 0.1)
+        self.purge_prob = config.get('mut_pack_purge_prob', 0.15)
+        self.bridge_prob = config.get('mut_tour_bridge_prob', 0.15)
 
     def do(self, x_ind):
-        # x_ind is a 1D numpy array 
         x_mut = x_ind.copy()
         
         # 1. KNAPSACK MUTATION
         if np.random.random() < self.pack_prob:
             pack_genes = x_mut[self.n_cities:]
-            picked = pack_genes > 0.5
-            if np.any(picked):
-                indices = np.where(picked)[0]
-                # Add noise to scores to vary selection
-                noisy_scores = self.scores[indices] * np.random.uniform(0.9, 1.1, len(indices))
-                worst = indices[np.argmin(noisy_scores)]
-                x_mut[self.n_cities + worst] = 0.0
+            rand_val = np.random.random()
             
-            not_picked = ~picked
-            if np.any(not_picked):
-                indices = np.where(not_picked)[0]
-                # Pick from top candidates
-                candidates = indices[np.argsort(self.scores[indices])[-20:]]
-                if len(candidates) > 0:
-                    best = np.random.choice(candidates)
-                    x_mut[self.n_cities + best] = 1.0
+            # Mode A: Random Flip (Exploration)
+            if rand_val < self.flip_prob:
+                n_flips = max(1, int(self.n_items * 0.05))
+                idxs = np.random.choice(self.n_items, n_flips, replace=False)
+                pack_genes[idxs] = 1.0 - pack_genes[idxs]
+            
+            # Mode B: The "Purge" (Reset to empty)
+            elif rand_val < (self.flip_prob + self.purge_prob):
+                pack_genes[:] = 0.0
+                
+            # Mode C: Standard Bit Flip (Refinement)
+            else:
+                n_flips = np.random.randint(1, 5)
+                idxs = np.random.choice(self.n_items, n_flips, replace=False)
+                pack_genes[idxs] = 1.0 - pack_genes[idxs]
 
-        # 2. GUARDED TOUR MUTATION
+            x_mut[self.n_cities:] = pack_genes
+
+        # 2. TOUR MUTATION
         if np.random.random() < self.tour_prob:
-            tour_keys = x_mut[:self.n_cities]
-            current_order = np.argsort(tour_keys)
+            # Mode A: Double Bridge (Large Jump)
+            if np.random.random() < self.bridge_prob:
+                keys = x_mut[:self.n_cities]
+                n = len(keys)
+                if n >= 8:
+                    idxs = np.sort(np.random.choice(n, 4, replace=False))
+                    keys[idxs[0]:idxs[1]] += 0.8 
+                    keys[idxs[2]:idxs[3]] -= 0.8
+                    x_mut[:self.n_cities] = np.clip(keys, 0, 1)
             
-            a = np.random.randint(1, self.n_cities - 2)
-            window = np.random.randint(2, 100)
-            b = min(a + window, self.n_cities - 1)
-            
-            # Indices in the tour array
-            idx_prev = current_order[a-1]
-            idx_a    = current_order[a]
-            idx_b    = current_order[b]
-            idx_next = current_order[(b+1) % self.n_cities] 
-            
-            p_prev = self.nodes[idx_prev]
-            p_a    = self.nodes[idx_a]
-            p_b    = self.nodes[idx_b]
-            p_next = self.nodes[idx_next]
-            
-            d_current = np.linalg.norm(p_prev - p_a) + np.linalg.norm(p_b - p_next)
-            d_new     = np.linalg.norm(p_prev - p_b) + np.linalg.norm(p_a - p_next)
-            
-            delta = d_new - d_current
-            # Only apply if penalty is low
-            if delta < self.tolerance:
-                key_indices = current_order[a:b+1]
-                keys_values = x_mut[key_indices]
-                x_mut[key_indices] = keys_values[::-1] # Reverse values -> Reverse sort order
+            # Mode B: 2-Opt (Local Search)
+            else:
+                tour_keys = x_mut[:self.n_cities]
+                current_order = np.argsort(tour_keys)
+                
+                a = np.random.randint(1, self.n_cities - 2)
+                window = np.random.randint(2, 50)
+                b = min(a + window, self.n_cities - 1)
+                
+                idx_prev, idx_a = current_order[a-1], current_order[a]
+                idx_b, idx_next = current_order[b], current_order[(b+1) % self.n_cities]
+                
+                p_prev, p_a = self.nodes[idx_prev], self.nodes[idx_a]
+                p_b, p_next = self.nodes[idx_b], self.nodes[idx_next]
+                
+                d_curr = np.linalg.norm(p_prev - p_a) + np.linalg.norm(p_b - p_next)
+                d_new  = np.linalg.norm(p_prev - p_b) + np.linalg.norm(p_a - p_next)
+                
+                if (d_new - d_curr) < self.tolerance:
+                    key_indices = current_order[a:b+1]
+                    keys_values = x_mut[key_indices]
+                    x_mut[key_indices] = keys_values[::-1] 
                 
         return x_mut
 
@@ -132,43 +157,23 @@ class Crossover:
         self.n_cities = problem.n_cities
 
     def do(self, p1, p2):
-        # p1, p2 are 1D arrays
-        # Returns 2 offspring
-        off1 = p1.copy()
-        off2 = p2.copy()
+        off1, off2 = p1.copy(), p2.copy()
         
-        # Uniform crossover for bitmask
-        mask = np.random.random(self.n_cities + len(p1[self.n_cities:])) < 0.5
-        
-        # Simplified: Uniform Crossover on Packing only
+        # Packing: Uniform Crossover
         pack_start = self.n_cities
-        
-        pack1 = p1[pack_start:]
-        pack2 = p2[pack_start:]
-        
+        pack1, pack2 = p1[pack_start:], p2[pack_start:]
         mask = np.random.random(len(pack1)) < 0.5
-        
-        new_pack1 = np.where(mask, pack1, pack2)
-        new_pack2 = np.where(mask, pack2, pack1)
-        
-        off1[pack_start:] = new_pack1
-        off2[pack_start:] = new_pack2
-        
-        # Keep tours from parents directly (Locked Tour) or could interpolate keys
+        off1[pack_start:] = np.where(mask, pack1, pack2)
+        off2[pack_start:] = np.where(mask, pack2, pack1)
         
         return [off1, off2]
 
-# ==========================================
-# 3. PROBLEM CLASS
-# ==========================================
 class TTPProblem:
     def __init__(self, filename, base_tour):
         self.filename = filename
         self.base_tour = base_tour 
         self._load_data(filename)
         self._precalc_physics() 
-        
-        # Attributes required by framework
         self.n_var = self.n_cities + self.n_items
         self.n_obj = 2
         self.xl = 0
@@ -207,34 +212,26 @@ class TTPProblem:
         self.ratio_scores = self.item_profits / (self.item_weights + 1e-9)
 
     def evaluate(self, X):
-        # X is (N_pop, n_var)
         n_pop = len(X); F = np.zeros((n_pop, 2)); cap = self.capacity; v_diff = self.v_max - self.v_min
         item_w = self.item_weights; item_p = self.item_profits
         item_l = self.item_locs; r_scores = self.ratio_scores; nodes = self.nodes
         
         for i in range(n_pop):
-            # Decode Tour
             tour = np.argsort(X[i, :self.n_cities])
-            
-            # Decode Packing
             pack_genes = X[i, self.n_cities:]
             picked_mask = pack_genes > 0.5
             
-            # Greedy Repair()
             current_w = np.sum(item_w[picked_mask])
             if current_w > cap:
                 idxs = np.where(picked_mask)[0]
-                # Drop items with worst Profit/Weight ratio 
                 sorted_idxs = idxs[np.argsort(r_scores[idxs])]
                 ws = item_w[sorted_idxs]; cum_drop = np.cumsum(ws)
-                # Find how many to drop
                 excess = current_w - cap
                 drop_count = np.searchsorted(cum_drop, excess) + 1
                 picked_mask[sorted_idxs[:drop_count]] = False
             
             current_p = np.sum(item_p[picked_mask])
             
-            # TTP Travel Time Calculation
             city_weights = np.zeros(self.n_cities)
             if np.any(picked_mask): 
                 np.add.at(city_weights, item_l[picked_mask], item_w[picked_mask])
@@ -243,17 +240,10 @@ class TTPProblem:
             weights_ordered = city_weights[tour]
             
             dists = np.sqrt(np.sum((coords_ordered - np.roll(coords_ordered, -1, axis=0))**2, axis=1))
-            # Load accumulation along the path
             cur_loads = np.cumsum(weights_ordered)
-            # Velocity at each step. Note: TTP usually defines velocity based on weight *after* leaving city i.
-            # Formula: v = v_max - (current_load / capacity) * (v_max - v_min)
             velocities = np.clip(self.v_max - (cur_loads / cap) * v_diff, self.v_min, self.v_max)
             
-            # Distance is typically edge i -> i+1.
-            # Standard TTP: Time = sum( dist[i] / v[i] )
-            # The load on the return leg is the total load.
-            
             F[i, 0] = np.sum(dists / velocities)
-            F[i, 1] = -current_p # Minimize negative profit
+            F[i, 1] = -current_p 
             
         return F

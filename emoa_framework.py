@@ -166,7 +166,7 @@ class CustomSMSEMOA:
                 else:
                     current_front_indices = list(front_indices)
                     
-                    ref_point = np.ones(2) + 2.0 
+                    ref_point = np.ones(2) + 1.0 
                     
                     while len(current_front_indices) > remaining_slots:
                         sub_F_norm = norm_F[current_front_indices]
