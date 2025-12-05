@@ -18,8 +18,11 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION SECTION
 # ==========================================
 CONFIG = {
+    # --- Reproducibility ---
+    'seed': 99,                 # Master Random Seed (Controls all randomness)
+
     # --- Pre-Processing ---
-    'ils_time_limit': 240,       # Seconds for initial tour optimization
+    'ils_time_limit': 60,       # Seconds for initial tour optimization
     
     # --- General GA Settings ---
     'pop_size': 100,            # Population Size
@@ -214,6 +217,10 @@ def main():
     os.makedirs(res_graph_dir, exist_ok=True)
     os.makedirs(final_compare_dir, exist_ok=True)
 
+    # 1. APPLY MASTER SEED
+    np.random.seed(CONFIG['seed'])
+    print(f">>> Global Random Seed set to: {CONFIG['seed']}")
+
     files = sorted(glob.glob(os.path.join(resource_dir, "*.txt")))
     if not files: print("No files found."); return
 
@@ -225,7 +232,7 @@ def main():
     file_name = os.path.basename(selected_path)
     base_name = file_name.replace(".txt", "")
 
-    # 1. ILS Optimization
+    # 2. ILS Optimization
     temp_nodes, temp_items = [], []
     with open(selected_path, 'r') as f:
         content = f.read()
@@ -243,26 +250,29 @@ def main():
     items_arr = np.array(temp_items)
     
     print(f">>> Running ILS Pre-Optimization (Limit: {CONFIG['ils_time_limit']}s)...")
-    best_tour = run_parallel_ils(nodes_arr, time_limit=CONFIG['ils_time_limit']) 
+    best_tour = run_parallel_ils(nodes_arr, time_limit=CONFIG['ils_time_limit'], seed=CONFIG['seed']) 
     best_tour = optimize_tour_orientation(nodes_arr, best_tour, items_arr)
 
-    # 2. EVOLUTION
+    # 3. EVOLUTION
     problem = TTPProblem(selected_path, best_tour)
     print(f">>> Problem: Cap={problem.capacity}, v_max={problem.v_max}")
     print(f">>> Config: Pop={CONFIG['pop_size']}, Gen={CONFIG['n_gen']}")
     
-    # Initialize components with Config
+    # Initialize components with Config and SEED
     sampling = TunableSpectrumSampling(
         sigma_min=CONFIG['sample_sigma_min'], 
-        sigma_max=CONFIG['sample_sigma_max']
+        sigma_max=CONFIG['sample_sigma_max'],
+        seed=CONFIG['seed']
     )
     
     mutation = Mutation(problem, config=CONFIG)
     
-    algorithm = CustomSMSEMOA(problem, CONFIG['pop_size'], sampling, Crossover(problem), mutation)
+    crossover = Crossover(problem, seed=CONFIG['seed'])
+    
+    algorithm = CustomSMSEMOA(problem, CONFIG['pop_size'], sampling, crossover, mutation)
     final_pop = algorithm.run(n_gen=CONFIG['n_gen'], verbose=True)
 
-    # 3. Save
+    # 4. Save
     res_F = final_pop.get_F()
     res_X = final_pop.get_X()
     
@@ -283,7 +293,7 @@ def main():
             f.write(f"{' '.join(map(str, packing))}\n")
             f.write("\n")
 
-    # 4. Compare
+    # 5. Compare
     compare_and_save(file_name, final_pop, comp_results_dir, final_compare_dir)
 
 if __name__ == "__main__":

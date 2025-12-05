@@ -4,9 +4,10 @@ import numpy as np
 # 1. SAMPLING
 # ==========================================
 class TunableSpectrumSampling:
-    def __init__(self, sigma_min=1.0, sigma_max=10.0):
+    def __init__(self, sigma_min=1.0, sigma_max=10.0, seed=None):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
+        self.rng = np.random.default_rng(seed)
 
     def do(self, problem, n_samples):
         n_var = problem.n_var
@@ -33,9 +34,9 @@ class TunableSpectrumSampling:
                 X[i, :n_c] = base_k
             else:
                 step_size = 1.0 / n_c
-                # Use Configured Sigma
-                sigma = step_size * np.random.uniform(self.sigma_min, self.sigma_max) 
-                noise = np.random.normal(0, sigma, n_c)
+                # Use Instance RNG
+                sigma = step_size * self.rng.uniform(self.sigma_min, self.sigma_max) 
+                noise = self.rng.normal(0, sigma, n_c)
                 X[i, :n_c] = np.clip(base_k + noise, 0, 1)
 
             # --- B. PACKING COMPONENT ---
@@ -50,12 +51,12 @@ class TunableSpectrumSampling:
                         X[i, n_c + idx] = 1.0
                         curr_w += problem.item_weights[idx]
             else:
-                if np.random.random() < 0.3:
-                    X[i, n_c:] = (np.random.random(problem.n_items) < 0.1).astype(float)
+                if self.rng.random() < 0.3:
+                    X[i, n_c:] = (self.rng.random(problem.n_items) < 0.1).astype(float)
                 else:
                     target_pct = (i - 1) / (n_samples - 2) 
                     target_weight = problem.capacity * target_pct
-                    alpha = np.random.uniform(0.5, 1.5)
+                    alpha = self.rng.uniform(0.5, 1.5)
                     tuned_cost = problem.item_weights * (item_dists ** alpha + 1e-9)
                     tuned_scores = problem.item_profits / (tuned_cost + 1e-9)
                     
@@ -69,10 +70,10 @@ class TunableSpectrumSampling:
         return X
 
 # ==========================================
-# 2.MUTATION And CROSSOVER
+# 2. MUTATION And CROSSOVER
 # ==========================================
 class Mutation:
-    def __init__(self, problem, config=None):
+    def __init__(self, problem, config=None, seed=None):
         self.n_cities = problem.n_cities
         self.n_items = problem.n_items
         self.nodes = problem.nodes
@@ -88,19 +89,23 @@ class Mutation:
         self.flip_prob = config.get('mut_pack_flip_prob', 0.1)
         self.purge_prob = config.get('mut_pack_purge_prob', 0.15)
         self.bridge_prob = config.get('mut_tour_bridge_prob', 0.15)
+        
+
+        _seed = seed if seed is not None else config.get('seed', None)
+        self.rng = np.random.default_rng(_seed)
 
     def do(self, x_ind):
         x_mut = x_ind.copy()
         
         # 1. KNAPSACK MUTATION
-        if np.random.random() < self.pack_prob:
+        if self.rng.random() < self.pack_prob:
             pack_genes = x_mut[self.n_cities:]
-            rand_val = np.random.random()
+            rand_val = self.rng.random()
             
             # Mode A: Random Flip (Exploration)
             if rand_val < self.flip_prob:
                 n_flips = max(1, int(self.n_items * 0.05))
-                idxs = np.random.choice(self.n_items, n_flips, replace=False)
+                idxs = self.rng.choice(self.n_items, n_flips, replace=False)
                 pack_genes[idxs] = 1.0 - pack_genes[idxs]
             
             # Mode B: The "Purge" (Reset to empty)
@@ -109,20 +114,20 @@ class Mutation:
                 
             # Mode C: Standard Bit Flip (Refinement)
             else:
-                n_flips = np.random.randint(1, 5)
-                idxs = np.random.choice(self.n_items, n_flips, replace=False)
+                n_flips = self.rng.integers(1, 5)
+                idxs = self.rng.choice(self.n_items, n_flips, replace=False)
                 pack_genes[idxs] = 1.0 - pack_genes[idxs]
 
             x_mut[self.n_cities:] = pack_genes
 
         # 2. TOUR MUTATION
-        if np.random.random() < self.tour_prob:
+        if self.rng.random() < self.tour_prob:
             # Mode A: Double Bridge (Large Jump)
-            if np.random.random() < self.bridge_prob:
+            if self.rng.random() < self.bridge_prob:
                 keys = x_mut[:self.n_cities]
                 n = len(keys)
                 if n >= 8:
-                    idxs = np.sort(np.random.choice(n, 4, replace=False))
+                    idxs = np.sort(self.rng.choice(n, 4, replace=False))
                     keys[idxs[0]:idxs[1]] += 0.8 
                     keys[idxs[2]:idxs[3]] -= 0.8
                     x_mut[:self.n_cities] = np.clip(keys, 0, 1)
@@ -132,8 +137,8 @@ class Mutation:
                 tour_keys = x_mut[:self.n_cities]
                 current_order = np.argsort(tour_keys)
                 
-                a = np.random.randint(1, self.n_cities - 2)
-                window = np.random.randint(2, 50)
+                a = self.rng.integers(1, self.n_cities - 2)
+                window = self.rng.integers(2, 50)
                 b = min(a + window, self.n_cities - 1)
                 
                 idx_prev, idx_a = current_order[a-1], current_order[a]
@@ -153,8 +158,9 @@ class Mutation:
         return x_mut
 
 class Crossover:
-    def __init__(self, problem):
+    def __init__(self, problem, seed=None):
         self.n_cities = problem.n_cities
+        self.rng = np.random.default_rng(seed)
 
     def do(self, p1, p2):
         off1, off2 = p1.copy(), p2.copy()
@@ -162,7 +168,7 @@ class Crossover:
         # Packing: Uniform Crossover
         pack_start = self.n_cities
         pack1, pack2 = p1[pack_start:], p2[pack_start:]
-        mask = np.random.random(len(pack1)) < 0.5
+        mask = self.rng.random(len(pack1)) < 0.5
         off1[pack_start:] = np.where(mask, pack1, pack2)
         off2[pack_start:] = np.where(mask, pack2, pack1)
         

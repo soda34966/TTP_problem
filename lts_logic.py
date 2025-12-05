@@ -84,6 +84,7 @@ def double_bridge_kick(tour):
 # ==========================================
 def ils_worker(args):
     nodes, seed, time_limit = args
+
     np.random.seed(seed)
     n = len(nodes)
     start_time = time.time()
@@ -134,10 +135,17 @@ def ils_worker(args):
             
     return best_tour, best_len
 
-def run_parallel_ils(nodes, time_limit=30):
+def run_parallel_ils(nodes, time_limit=30, seed=None):
     print(f"   > Starting Parallel ILS ({len(nodes)} cities) | Limit: {time_limit}s...")
+
+    if seed is not None:
+        np.random.seed(seed)
+    
     n_workers = max(1, multiprocessing.cpu_count() - 1)
-    tasks = [(nodes, np.random.randint(0, 10000) + i, time_limit) for i in range(n_workers)]
+    
+    # Generate stable seeds for each worker derived from the master seed
+    tasks = [(nodes, np.random.randint(0, 1000000) + i, time_limit) for i in range(n_workers)]
+    
     best_global_tour = None; best_global_len = float('inf')
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
         results = executor.map(ils_worker, tasks)
